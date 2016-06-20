@@ -1,0 +1,101 @@
+import java.sql.Array;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+
+public class Driver1 {
+
+	public static void main(String[] args) {
+
+		try {
+			Connection myConn = DriverManager
+					.getConnection("jdbc:mysql://localhost:3306/world?user=root&password=qwerty");
+
+			String query = "select distinct(Area), count(*) from afars.IssueData group by Area  ";
+			Statement stmt = myConn.createStatement();
+			ResultSet rs = stmt.executeQuery(query);
+			
+			JSONArray areaArray = new JSONArray();
+			while (rs.next()) {
+				String area = rs.getString("Area");
+				System.out.println(area);
+				
+				// System.out.println("display: "+area+",\n\tchildren: [\n\t\t{");
+
+				String query1 = "select distinct(Category), count(*) from afars.IssueData where Area='"
+						+ area + "' group by Category";
+
+				Statement stmt1 = myConn.createStatement();
+				ResultSet rs1 = stmt1.executeQuery(query1);
+				
+				JSONObject areaObj = new JSONObject();
+				areaObj.put("display", area);
+				JSONArray categoryArray = new JSONArray();
+				
+				while (rs1.next()) {
+					String category = 	rs1.getString("Category");
+					System.out.println(category);
+					// category=CategoryArray[iteration2];
+					String query2 = "select distinct(SubCategory) from afars.IssueData where Area='"
+							+ area + "' and Category='" + category + "' ";
+					Statement stmt2 = myConn.createStatement();
+					ResultSet rs2 = stmt2.executeQuery(query2);
+
+					JSONObject categoryObj = new JSONObject();
+					categoryObj.put("display", category);
+					
+					JSONArray subcategoryArray = new JSONArray();
+
+					while (rs2.next()) {
+						String subcategory = rs2.getString("SubCategory");
+						System.out.println(subcategory);
+						
+
+						String query3 = "Select distinct(Detail),Fid from afars.IssueData where  Area='"
+								+ area
+								+ "' and Category='"
+								+ category
+								+ "' and Subcategory='" + subcategory + "' ";
+						
+						Statement stmt3 = myConn.createStatement();
+						ResultSet rs3 = stmt3.executeQuery(query3);
+						
+						JSONObject subCategoryObj = new JSONObject();
+						subCategoryObj.put("display", subcategory);
+						
+						JSONObject subCategoryChildObj = new JSONObject();
+						JSONArray detailArray = new JSONArray();
+
+						while (rs3.next()) {
+							System.out.println(rs3.getString("Detail")
+									+ rs3.getString("Fid"));
+							JSONObject detailObject = new JSONObject();
+							detailObject.put("display", rs3.getString("Detail"));
+							detailObject.put("fid", rs3.getString("Fid"));
+							detailArray.add(detailObject);
+							subCategoryObj.put("children", detailArray);
+							 							
+						}
+						subcategoryArray.add(subCategoryObj);
+					}					
+					// System.out.println("\n}]");					
+					categoryArray.add(categoryObj);
+					categoryObj.put("children",subcategoryArray);
+					
+				}				
+				areaObj.put("children", categoryArray);
+				areaArray.add(areaObj);				
+			}
+			
+			System.out.println(areaArray);
+			System.out.println(" __________________");
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+	}
+}

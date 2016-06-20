@@ -1,0 +1,369 @@
+var issueDetail = angular.module( 'app.issueDetail', [
+    'ui.router',
+    'placeholders',
+    'ui.bootstrap',
+    'services.ReportService',
+    'database.dbServices',
+    'database.schema.entities'
+]);
+
+issueDetail.config(function config( $stateProvider, $compileProvider ) {
+
+    $compileProvider.imgSrcSanitizationWhitelist(/^\s*(https?|file|blob|cdvfile):|data:image\//);
+
+    $stateProvider.state( 'issueDetail', {
+        url: '/issueDetail/:flightDetail:issueDetail',
+        views: {
+            "main": {
+                controller: 'issueCtrl',
+                templateUrl: 'sections/issueDetail/issueDetail.tpl.html'
+            }
+        },
+        data:{ pageTitle: 'issueDetailScreen' }
+    });
+
+});
+
+issueDetail.controller( 'issueCtrl',function RegisterCtrl( $scope, $rootScope, $state, $stateParams, $filter, $log, $cordovaCamera, ReportService, DB, AppUtils,PASCService, dialogs) {
+
+    var mainInfo = null;
+    $scope.issueDetail = {};
+
+    $scope.haveData = false;
+
+
+    $scope.cabinList = ["F", "C", "Y"];
+
+    var loader_opts = {
+        'backdrop': 'static',
+        'size': 'sm',
+        'windowClass': 'align-modal-dialog'
+    };
+
+    $scope.getDisplayTitle = function(level) {
+        if(level===1) {
+            return  angular.isUndefined($scope.levelTwoObject) ? "Select Area" : $scope.levelTwoObject.display;
+        }
+        else if(level===2){
+                return  angular.isUndefined($scope.levelThreeObject) ? "Select Category" : $scope.levelThreeObject.display;
+        }
+        else if(level===3){
+
+                return  angular.isUndefined($scope.levelFourObject) ? "Select Sub-Category" : $scope.levelFourObject.display;
+
+        }else if(level===4){
+                if(angular.isUndefined($scope.levelFiveObject)){
+                    return "Select Detail";
+                }else{
+                    $scope.issueDetail.fid = $scope.levelFiveObject.fid;
+                    return $scope.levelFiveObject.display;
+                }
+
+        }else if(level===5){
+            if(angular.isUndefined($scope.issueDetail.vchCabin) || $scope.issueDetail.vchCabin === ""){
+                return "Select Cabin";
+            }else{
+                return $scope.issueDetail.vchCabin;
+            }
+        }
+    };
+
+    var unBindPersonalizedItemSelect = $scope.$on("EVENT_PERSONALIZED_ITEM_SELECT", function(event, arg){
+
+        if(arg.level === 1){
+            $scope.levelTwoObject = $scope.levelOneObject[arg.index];
+            delete $scope.levelThreeObject;
+            delete $scope.levelFourObject;
+            delete $scope.levelFiveObject;
+
+            $scope.issueDetail.vchArea = $scope.levelOneObject[arg.index].display;
+            delete $scope.issueDetail.vchCategory;
+            delete $scope.issueDetail.vchSubCategory;
+            delete $scope.issueDetail.vchDetail;
+            $scope.$broadcast("LEVEL_EXPAND",{index:2});
+        }else if(arg.level === 2){
+            $scope.levelThreeObject = $scope.levelTwoObject.children[arg.index];
+            delete $scope.levelFourObject;
+            delete $scope.levelFiveObject;
+            $scope.issueDetail.vchCategory = $scope.levelTwoObject.children[arg.index].display;
+
+            delete $scope.issueDetail.vchSubCategory;
+            delete $scope.issueDetail.vchDetail;
+
+            $scope.$broadcast("LEVEL_EXPAND",{index:3});
+        }else if(arg.level === 3){
+            $scope.levelFourObject = $scope.levelThreeObject.children[arg.index];
+            delete $scope.levelFiveObject;
+            $scope.issueDetail.vchSubCategory = $scope.levelThreeObject.children[arg.index].display;
+            delete $scope.issueDetail.vchDetail;
+            $scope.$broadcast("LEVEL_EXPAND",{index:4});
+        }else if(arg.level === 4){
+            $scope.levelFiveObject = $scope.levelFourObject.children[arg.index];
+            $scope.issueDetail.vchDetail = $scope.levelFourObject.children[arg.index].display;
+        }else if(arg.level === 5){
+            $scope.issueDetail.vchCabin = $scope.cabinList[arg.index];
+        }
+    });
+
+    function isValid(){
+        var validationString = null;
+        var loaderDialog = null;
+        if(angular.isUndefined($scope.issueDetail.vchArea)){
+
+            $rootScope.$emit('systemAlert', {title: 'Please', message: ' enter area.', type: 'warning', timeout: 2000});
+
+            return false;
+        }
+
+        if(angular.isUndefined($scope.issueDetail.vchCategory)){
+
+            $rootScope.$emit('systemAlert', {title: 'Please', message: ' enter category.', type: 'warning', timeout: 2000});
+
+            return false;
+        }
+
+        if(angular.isUndefined($scope.issueDetail.vchSubCategory)){
+
+            $rootScope.$emit('systemAlert', {title: 'Please', message: ' enter subcategory.', type: 'warning', timeout: 2000});
+
+            return false;
+        }
+
+        if(angular.isUndefined($scope.issueDetail.vchDetail)){
+
+            $rootScope.$emit('systemAlert', {title: 'Please', message: ' enter detail.', type: 'warning', timeout: 2000});
+            return false;
+        }
+
+       return true;
+    }
+
+    $scope.takePicture = function(){
+
+        var options = {
+            quality: 100,
+            destinationType: Camera.DestinationType.DATA_URL,
+            sourceType: Camera.PictureSourceType.CAMERA,
+            allowEdit: true,
+            encodingType: Camera.EncodingType.JPEG,
+            targetWidth: 100,
+            targetHeight: 100,
+            correctOrientation: true,
+            popoverOptions: CameraPopoverOptions,
+            saveToPhotoAlbum: false
+        };
+
+        $cordovaCamera.getPicture(options).then(function(imageData) {
+            $scope.issueDetail.issueImage = "data:image/jpeg;base64," + imageData;
+            $log.debug(imageData);
+        }, function(err) {
+            // error
+            $log.debug(err);
+        });
+    };
+
+    $scope.save  =  function () {
+
+        if(isValid()) {
+
+            if($scope.issueDetail.vchCabin === "Select Cabin" || $scope.issueDetail.vchCabin === "" || angular.isUndefined($scope.issueDetail.vchCabin)){
+                $scope.issueDetail.vchCabin = "";
+            }
+
+            if($scope.issueDetail.vchRemarks === '' || angular.isUndefined($scope.issueDetail.vchRemarks)){
+                $scope.issueDetail.vchRemarks = "";
+            }
+
+            $scope.issueDetail.vchRemarks = $scope.issueDetail.vchRemarks.replace(/"/g, '&');
+
+            var insertColumns = "intReportID, fid, vchArea, vchCategory, vchSubCategory, vchDetail, vchCabin, vchQuantity, vchRemarks, dteCreated, blnIssueSent, blnEmployeeCreated, issueImage";
+            var insertColumnValues = ''+'"'+
+                $scope.issueDetail.intReportID + '","' +
+                $scope.issueDetail.fid + '", "' +
+                $scope.issueDetail.vchArea + '", "' +
+                $scope.issueDetail.vchCategory + '", "' +
+                $scope.issueDetail.vchSubCategory + '", "' +
+                $scope.issueDetail.vchDetail + '", "' +
+                $scope.issueDetail.vchCabin + '", "' +
+                $scope.issueDetail.vchQuantity + '", "' +
+                $scope.issueDetail.vchRemarks + '", "' +
+                $filter('date')(new Date(), 'yyyy-MM-dd') + '", ' +
+                "'"+false+"'"+ " , "+
+                "'"+$scope.flight.blnEmployeeCreated+"'" + " , "+
+                "'"+$scope.issueDetail.issueImage + "'";
+
+            DB.save(Issue, IssueColumnsDef, insertColumns, insertColumnValues);
+            $scope.loadAll();
+            $log.debug("Image Data = ",$scope.issueDetail.issueImage);
+            $state.go("flight", {}, {location: false, inherit: false});
+        }
+    };
+
+    $scope.loadAll = function(){
+        DB.selectAll(Issue).then(function(result){
+            $log.info(JSON.stringify(result));
+         });
+    };
+
+    $scope.loadById = function(whereCondition){
+
+        DB.selectByWhere(Issue,whereCondition).then(function(result){
+            $log.debug("Load Updated Issue " + JSON.stringify(result));
+        });
+    };
+
+    $scope.updateById = function(){
+        if(isValid()) {
+            $scope.issueDetail.vchRemarks = $scope.issueDetail.vchRemarks.replace(/'/g, '@');
+            var entityColumnsValue =
+                " intReportID = '" + $scope.issueDetail.intReportID + "' ," +
+                " fid = '" + $scope.issueDetail.fid + "' ," +
+                " vchArea = '" + $scope.issueDetail.vchArea + "' ," +
+                " vchCategory = '" + $scope.issueDetail.vchCategory + "' , " +
+                " vchSubCategory = '" + $scope.issueDetail.vchSubCategory + "' , " +
+                " vchDetail = '" + $scope.issueDetail.vchDetail + "' , " +
+                " vchCabin = '" + $scope.issueDetail.vchCabin + "' , " +
+                " vchQuantity = '" + $scope.issueDetail.vchQuantity + "' , " +
+                " vchRemarks = '" + $scope.issueDetail.vchRemarks + "' ,"+
+                " issueImage = '" +$scope.issueDetail.issueImage + "'";
+
+            var whereCondition = "intIssueID = " + "'" + $scope.issueDetail.intIssueID + "'";
+
+            DB.updateByCondition(Issue, entityColumnsValue, whereCondition).then(function (result) {
+                $log.debug("Issue Updated " + JSON.stringify(result));
+            });
+
+            $scope.loadById(whereCondition);
+            $rootScope.goPrevious();
+        }
+    };
+
+    $scope.deleteById = function(){
+        var intIssueId = $scope.issueDetail.intIssueID;
+
+        var deleteInfo = {
+            id:$scope.issueDetail.intIssueID,
+            msg: 'Are you sure to delete this issue?',
+            type: 'warning'
+        };
+
+        dialogs.create('sections/confirm/confirm.modal.tpl.html','ConfirmCtrl', deleteInfo, loader_opts);
+    };
+
+    var loadIssueDetail = function() {
+
+        var issueDetailFromJson = angular.fromJson($stateParams.issueDetail);
+        var selectedFlight = angular.fromJson($stateParams.flightDetail);
+
+        ReportService.loadReports('report_afars_long').then(function(issueDetail){
+            $scope.levelOneObject = issueDetail.reportQuestions[0].questions[0].options;
+
+            if (issueDetailFromJson.vchArea != null) {
+                $scope.issueDetail = issueDetailFromJson;
+                $scope.haveData = true;
+
+                $scope.issueDetail.vchRemarks = $scope.issueDetail.vchRemarks.replace(/@/g, "'");
+                $scope.issueDetail.vchRemarks = $scope.issueDetail.vchRemarks.replace(/&/g, '"');
+
+                updateIssueDetail();
+            }
+        });
+
+        $scope.issueDetail.intReportID = selectedFlight.intReportID;
+        $scope.issueDetail.fid = selectedFlight.intFlightNumber;
+
+        $scope.flight = selectedFlight;
+    };
+
+    var updateIssueDetail = function(){
+        for(var i=0; i<$scope.levelOneObject.length; i++ ){
+            if($scope.issueDetail.vchArea === $scope.levelOneObject[i].display){
+                $scope.levelTwoObject = $scope.levelOneObject[i];
+                break;
+            }
+        }
+
+        for(var j=0; j<$scope.levelTwoObject.children.length; j++ ) {
+            if ($scope.issueDetail.vchCategory === $scope.levelTwoObject.children[j].display) {
+                $scope.levelThreeObject = $scope.levelTwoObject.children[j];
+                break;
+            }
+        }
+
+        for(var k=0; k<$scope.levelThreeObject.children.length; k++ ) {
+            if ($scope.issueDetail.vchSubCategory === $scope.levelThreeObject.children[k].display) {
+                $scope.levelFourObject = $scope.levelThreeObject.children[k];
+                break;
+            }
+        }
+
+        for(var l=0; l<$scope.levelFourObject.children.length; l++ ) {
+            if ($scope.issueDetail.vchDetail === $scope.levelFourObject.children[l].display) {
+                $scope.levelFiveObject = $scope.levelFourObject.children[l];
+                break;
+            }
+        }
+   };
+
+    function deleteHandler(event, issueId) {
+        var whereCondition = "intIssueID = " + "'" + issueId + "'";
+        DB.deleteByCondition(Issue, whereCondition).then(function (result) {
+            $state.go("flight", {}, {location: false, inherit: false});
+        });
+    }
+
+    var onRegister = function () {
+        loadIssueDetail();
+        var unBindDeleteHandler = $rootScope.$on("delete-confirm", deleteHandler);
+        $scope.$on('$destroy', unBindPersonalizedItemSelect);
+        $scope.$on('$destroy', unBindDeleteHandler);
+    };
+    onRegister();
+});
+
+issueDetail.factory("PASCService", function($rootScope, $log){
+
+    var selectorService = {};
+
+    selectorService.boradcastPersonalizedSelect = function(){
+        $rootScope.$broadcast("EVENT_PERSONALIZED_OPTION_SELECT");
+    };
+
+    selectorService.levelItemSelect = function(level, index){
+        $rootScope.$broadcast("EVENT_PERSONALIZED_ITEM_SELECT", {level:level, index:index});
+    };
+
+    return selectorService;
+});
+
+issueDetail.controller("personalizedSelectControl", function($scope, PASCService, $log){
+
+    $scope.levelIndex = 0;
+
+    $scope.isActive = false;
+
+    $scope.seletedIndex = -1;
+
+    $scope.activateSelector = function (myObject){
+        if(myObject !== null){
+            if(!$scope.isActive){
+                PASCService.boradcastPersonalizedSelect();
+            }
+            $scope.isActive = !$scope.isActive;
+        }
+    };
+    $scope.levelItemSelect = function(level, index) {
+
+        $scope.seletedIndex = index;
+        $scope.isActive = false;
+        PASCService.levelItemSelect(level, index);
+    };
+
+    $scope.$on("LEVEL_EXPAND", function (event, arg){
+        if(arg.index == $scope.levelIndex){
+            $scope.isActive = true;
+        }
+    });
+});
+
+
